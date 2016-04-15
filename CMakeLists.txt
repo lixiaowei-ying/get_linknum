@@ -1,0 +1,6 @@
+PROJECT(get_linknum)
+set(SRC get_linknum.cpp share_memory.cpp utils.cpp)
+set(EXECUTABLE_OUTPUT_PATH ${PROJECT_BINARY_DIR}/bin)
+add_executable(get_linknum ${SRC})
+include_directories(/usr/local/include/libxml2/)
+target_link_libraries(get_linknum pthread rt xml2)
