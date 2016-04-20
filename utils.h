@@ -6,6 +6,8 @@
 
 #include "share_memory.h"
 
+#define		INIFILE_PATH	"/root/example.xml"
+
 /*
  *	通过CTDB获取节点主机的虚拟IP
  *	返回值：
@@ -13,6 +15,12 @@
  * */
 int get_virip(std::vector<std::string> &ip);
 
+/*
+ *	通过CTDB获取节点的物理IP
+ *	返回值：
+ *		成功返回0，失败返回-1
+ * */
+int get_device_ip(std::string &ip);
 
 /*
  *	根据协议获取旗下的端口号
@@ -32,6 +40,37 @@ int get_port_by_protocol(const char *protocol,std::vector<int> &port);
  * */
 int get_interval(const char *interval);
 
+
+/*
+ *	解析XML配置文件获取目的IP
+ *	返回值：
+ *		成功返回0，失败返回-1
+ * */
+int get_dstip(std::string &ip);
+
+
+/*
+ *	解析XML配置文件获取目的端口
+ *	返回值：
+ *		成功返回端口号，失败返回-1
+ * */
+int get_dstport(void);
+
+/*
+ *	解析XML配置文件获取snmp的版本号
+ *	返回值：
+ *		成功返回版本号，失败返回-1
+ * */
+int get_version(void);
+
+/*
+ *	解析XML配置文件获取snmp的通讯密码
+ *	返回值：
+ *		成功返回0，失败返回-1
+ * */
+int get_community(std::string &community);
+
+
 /*
  *	根据传入参数ip和port对文件进行解析过滤
  *	获取到每个虚拟IP对应的连接数
@@ -40,7 +79,7 @@ int get_interval(const char *interval);
  *		传出：data
  *	成功返回0，失败返回-1
  * */
-int parse_file(std::vector<std::string> &ip,std::vector<int> &port,
-		const char *protocol,std::vector<struct conn_data> &data);
+int parse_file(std::vector<std::string> &ip,std::vector<int> &nfs_port,
+		std::vector<int> &cifs_port,std::vector<struct conn_data> &data);
 
 #endif 		//__UTILS_H__

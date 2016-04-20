@@ -14,8 +14,8 @@
 struct conn_data
 {
 	char ip[16];						/// 虚拟IP
-	char protocol[10];					/// NAS协议
-	int conn;							/// 连接数的值
+	int cifs_conn;							/// 协议CIFS的连接数的值
+	int nfs_conn;							/// 协议NFS的连接数的值
 };
 
 /*
@@ -27,7 +27,7 @@ class Shm_mem
 		Shm_mem();
 		~Shm_mem();
 
-	public:
+	private:
 		char *shmptr;				/// 共享内存首地址
 		sem_t *sem;					/// 信号量
 
