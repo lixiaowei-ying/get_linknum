@@ -6,7 +6,9 @@
 
 #include "share_memory.h"
 
-#define		INIFILE_PATH	"/root/example.xml"
+#define		INIFILE_PATH				"/root/example.xml"
+#define		INTERVAL_SEND_STRING		"Send"
+#define		INTERVAL_COLLECT_STRING		"Collect"
 
 /*
  *	通过CTDB获取节点主机的虚拟IP

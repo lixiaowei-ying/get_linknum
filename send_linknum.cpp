@@ -21,11 +21,11 @@ oid objid_snmptrap[] 		= { 1, 3, 6, 1, 6, 3, 1, 1, 4, 1, 0 };
 oid objid_proto_version[] 	= { 1, 3, 6, 1, 4, 1, 16550, 0  }; 
 oid objid_current_time[] 	= { 1, 3, 6, 1, 4, 1, 16550, 1  }; 
 oid objid_data_type[] 		= { 1, 3, 6, 1, 4, 1, 16550, 2  }; 
-oid objid_data_length[] 	= { 1, 3, 6, 1, 4, 1, 16550, 3  }; 
-oid objid_virtual_ip[] 		= { 1, 3, 6, 1, 4, 1, 16550, 4  }; 
-oid objid_cifs_links[] 		= { 1, 3, 6, 1, 4, 1, 16550, 5  }; 
+oid objid_device_ip[] 		= { 1, 3, 6, 1, 4, 1, 16550, 3  }; 
+oid objid_data_length[] 	= { 1, 3, 6, 1, 4, 1, 16550, 4  }; 
+oid objid_virtual_ip[] 		= { 1, 3, 6, 1, 4, 1, 16550, 5  }; 
 oid objid_nfs_links[] 		= { 1, 3, 6, 1, 4, 1, 16550, 6  }; 
-oid objid_device_ip[] 		= { 1, 3, 6, 1, 4, 1, 16550, 7  }; 
+oid objid_cifs_links[] 		= { 1, 3, 6, 1, 4, 1, 16550, 7  }; 
 
 using namespace std;
 
@@ -67,6 +67,11 @@ int init_snmp_pdu(string &dst_ip,int dst_port,
 	}
 	
 	pdu = snmp_pdu_create(SNMP_MSG_TRAP2);
+	if (NULL == pdu)
+	{
+		snmp_perror("snmp_pdu_create");
+		return -1;
+	}
 
 	char systimebuf[128] = {0};
 	char timebuf[128] = {0};
@@ -100,19 +105,44 @@ int main(int argc, char **argv)
 {
 	string dst_ip;
 	string community;
-	string device_ip = "192.168.1.4";
+	string device_ip;
 	int version = 0;
 	int dst_port = 0;
 	int send_interval = 0;
 
-	get_community(community);
-	get_dstip(dst_ip);
-	dst_port = get_dstport();
-	send_interval = get_interval("Send");
-	version = get_version();
-	get_device_ip(device_ip);
-	printf("version:%d  dstip:%s  dstport:%d  comm:%s\n",
-			version,dst_ip.c_str(),dst_port,community.c_str());
+	if (get_community(community) < 0)
+	{
+		syslog(LOG_ERR,"get community from XML file failed");
+		return 0;
+	}
+	if (get_dstip(dst_ip) < 0)
+	{
+		syslog(LOG_ERR,"get dst IP from XML file failed");
+		return 0;
+	}
+	if ((dst_port = get_dstport()) <= 0)
+	{
+		syslog(LOG_ERR,"get dst port from XML file failed");
+		return 0;
+	}
+	if ((send_interval = get_interval(INTERVAL_SEND_STRING)) <= 0)
+	{
+		syslog(LOG_ERR,"get send interval from XML file failed");
+		return 0;
+	}
+	if ((version = get_version()) != 2)
+	{
+		syslog(LOG_ERR,"The SNMP version in XML file must be 2");
+		return 0;
+	}
+	if (get_device_ip(device_ip) < 0)
+	{
+		syslog(LOG_ERR,"get actual device IP from CTDB ip failed");
+		return 0;
+	}
+
+//	printf("version:%d  dstip:%s  dstport:%d  comm:%s\n",
+//			version,dst_ip.c_str(),dst_port,community.c_str());
 
 	Shm_mem mem;
 	if (mem.shmopen() < 0)
@@ -153,9 +183,9 @@ int main(int argc, char **argv)
 		{
 			char cifsbuf[64] = {0};
 			char nfsbuf[64] = {0};
-			sprintf(cifsbuf,"%d",(*it).cifs_conn);
-			sprintf(nfsbuf,"%d",(*it).nfs_conn);
-			snmp_add_var(pdu,objid_virtual_ip,sizeof(objid_virtual_ip)/sizeof(oid),'s',(*it).ip);
+			sprintf(cifsbuf,"%d",it->cifs_conn);
+			sprintf(nfsbuf,"%d",it->nfs_conn);
+			snmp_add_var(pdu,objid_virtual_ip,sizeof(objid_virtual_ip)/sizeof(oid),'s',it->ip);
 			snmp_add_var(pdu,objid_nfs_links,sizeof(objid_nfs_links)/sizeof(oid),'i',cifsbuf);
 			snmp_add_var(pdu,objid_cifs_links,sizeof(objid_cifs_links)/sizeof(oid),'i',nfsbuf);
 		}

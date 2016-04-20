@@ -17,7 +17,9 @@ using namespace std;
  * */
 int get_virip(vector<string> &ip)
 {
-	
+	ip.clear();
+	ip.push_back("192.168.1.4");
+	return 0;
 }
 
 /*
@@ -27,7 +29,9 @@ int get_virip(vector<string> &ip)
  * */
 int get_device_ip(std::string &ip)
 {
-
+	ip.clear();
+	ip = string("192.168.1.2");
+	return 0;
 }
 
 /*
@@ -114,6 +118,7 @@ int get_port_by_protocol(const char *protocol,vector<int> &port)
  *	从XML配置文件中获取到时间间隔
  *	参数：
  *		interval 期望获取到的时间间隔字符串
+ *		目前只有utils.h中的两个字符串宏
  *	返回值：
  *		成功返回时间间隔，失败返回-1
  * */
@@ -424,17 +429,19 @@ static bool check_line(const char *line,const char *ip,int port)
 		return false;
 	
 	char *pline = strdup(line);
-	char *pfree = pline;
-	char *pitem = NULL;
+	char *pfree = pline;				///	free指针
+	char *pitem = NULL;					/// 临时指针
 
 	pitem = strtok(pline," ");
 	while(pitem != NULL)
 	{
+		///	先判断目的IP是否匹配，
 		if (!strncmp(pitem,"dst=",strlen("dst=")))
 		{
 			if (string(pitem) != string("dst=") + string(ip))
 				break;
 		}
+		/// 再判断目的端口是否匹配
 		if (!strncmp(pitem,"dport=",strlen("dport=")))
 		{
 			char str_port[10] = {0};
@@ -463,8 +470,8 @@ static bool check_line(const char *line,const char *ip,int port)
 int parse_file(vector<string> &ip,vector<int> &nfs_port,
 		vector<int> &cifs_port,vector<struct conn_data> &data)
 {
-	if (ip.empty() || nfs_port.empty() 
-			|| cifs_port.empty())
+	if (ip.empty() || 
+			(nfs_port.empty() && cifs_port.empty()))
 		return -1;
 	data.clear();
 
@@ -503,5 +510,6 @@ int parse_file(vector<string> &ip,vector<int> &nfs_port,
 			}
 		}
 	}
+	fclose(fp);
 	return 0;
 }

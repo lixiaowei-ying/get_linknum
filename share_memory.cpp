@@ -138,8 +138,6 @@ int Shm_mem::shm_write(vector<struct conn_data> &vet)
 {
 	if (NULL == shmptr)
 		return -1;
-	if (vet.empty())
-		return -1;
 
 	vector<struct conn_data>::iterator it;
 	it = vet.begin();
