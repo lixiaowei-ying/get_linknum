@@ -14,7 +14,7 @@
 
 #define 	DATA_TYPE_LINKNUM	1
 #define		PROTOCOL_VERSION	"1.0"
-#define		DEFINED_OID		".1.3.6.1.4.1.16550"
+#define		DEFINED_OID			".1.3.6.1.4.1.16550"
 
 oid objid_sysuptime[] 		= { 1, 3, 6, 1, 2, 1, 1, 3, 0 }; 
 oid objid_snmptrap[] 		= { 1, 3, 6, 1, 6, 3, 1, 1, 4, 1, 0 }; 

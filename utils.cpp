@@ -5,10 +5,19 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
+#include <syslog.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <sys/ioctl.h>
+#include <netinet/in.h>
+#include <net/if.h>
+#include <net/if_arp.h>
+#include <arpa/inet.h>
 
 using namespace std;
 
 #define		FILE_PATH 		"/proc/net/nf_conntrack"
+#define		NODES_FILE		"/etc/ctdb/nodes"
 
 /*
  *	通过CTDB获取节点主机的虚拟IP
@@ -18,20 +27,166 @@ using namespace std;
 int get_virip(vector<string> &ip)
 {
 	ip.clear();
-	ip.push_back("192.168.1.4");
+	///	打开ctdb ip 并获取第一行数据的节点号
+	FILE *fp = popen("/etc/init.d/ctdb ip","r");
+	if (NULL == fp)
+	{
+		syslog(LOG_ERR,"/etc/init.d/ctdb ip execute failed");
+		return -1;
+	}
+	char line[1024] = {0};
+	int node = -1;
+	if (fgets(line,sizeof(line),fp) == NULL)
+	{
+		syslog(LOG_ERR,"/etc/init.d/ctdb ip has not result");
+		pclose(fp);
+		return -1;
+	}
+	if (strstr(line,"Public IPs on node") == NULL)
+	{
+		syslog(LOG_ERR,"/etc/init.d/ctdb ip has wrong result");
+		pclose(fp);
+		return -1;
+	}
+	node = atoi(line+strlen("Public IPs on node "));		///	读取出第一行该节点的数值
+	if (node < 0)
+	{
+		syslog(LOG_ERR,"get the node of the device failed");
+		pclose(fp);
+		return -1;
+	}
+
+	while (!feof(fp))
+	{
+		memset(line,0,sizeof(line));
+		if (fgets(line,sizeof(line),fp) != NULL)
+		{
+			char *tok = NULL;
+			char *tip = NULL;
+			tip = strtok(line," ");
+			if (tip == NULL)
+			{
+				pclose(fp);
+				return -1;
+			}
+			tok = strtok(NULL," ");			/// 获取到该行的node值
+			if (tok == NULL)
+			{
+				pclose(fp);
+				return -1;
+			}
+			if (atoi(tok) == node)			/// 如果node值和本节点的node相等，添加该虚拟IP
+				ip.push_back(string(tip));
+		}
+	}
+	pclose(fp);
 	return 0;
 }
 
 /*
- *	通过CTDB获取节点的物理IP
+ *	通过ioctl调用，根据接口名获取到当接口的IP
+ *	返回值：
+ *		成功返回0，失败返回-1
+ * */
+int ip_by_interface(string &interface,string &ip)
+{
+	int sock;  
+	struct ifreq ifr;  
+
+	sock = socket(AF_INET, SOCK_DGRAM, 0);  
+	if (sock == -1)  
+	{  
+		syslog(LOG_ERR,"create socket failed");
+		return -1;                  
+	}  
+
+	strncpy(ifr.ifr_name, interface.c_str(), IFNAMSIZ);  
+	ifr.ifr_name[IFNAMSIZ - 1] = 0;  
+
+	if (ioctl(sock, SIOCGIFADDR, &ifr) < 0)  
+	{  
+		syslog(LOG_ERR,"ioctl failed");
+		return -1;  
+	}  
+
+	/// 将取得到的IP赋值给传出型参数ip
+	char addr[INET_ADDRSTRLEN] = {0};
+	if (inet_ntop(AF_INET,&ifr.ifr_addr,addr,INET_ADDRSTRLEN))
+		ip = string(addr);
+	close(sock);
+	return 0;  
+	
+}
+
+/*
+ *	通过读取/etc/ctdb/nodes文件获取到多个IP
+ *	然后和当前节点下的物理ip进行比对，
+ *	然后得到真实的物理IP
  *	返回值：
  *		成功返回0，失败返回-1
  * */
 int get_device_ip(std::string &ip)
 {
 	ip.clear();
-	ip = string("192.168.1.2");
-	return 0;
+	FILE *fp = fopen(NODES_FILE,"r");
+	if (fp == NULL)
+	{
+		syslog(LOG_ERR,"open %s failed\n",NODES_FILE);
+		return -1;
+	}
+	///	解析nodes文件，获取到文件中的所有IP
+	vector<string> nodes_ip;
+	while(!feof(fp))
+	{
+		char line[1024] = {0};
+		if (fgets(line,sizeof(line),fp) != NULL)
+			nodes_ip.push_back(string(line));
+	}
+	fclose(fp);
+	
+	/// 读取/proc/net/dev文件，获取设备的所有网络接口
+	FILE *fp_dev = fopen("/prov/net/dev","r");
+	if (fp_dev == NULL)
+	{
+		syslog(LOG_ERR,"open /prov/net/dev failed");
+		return -1;
+	}
+	vector<string> interface;
+	while(!feof(fp_dev))			
+	{
+		char line[1024] = {0};
+		if (fgets(line,sizeof(line),fp_dev) != NULL)
+		{
+			if (strstr(line,":") == NULL)
+				continue;
+			char *inter = strtok(line,":");
+			if (strcmp(inter,"lo") == 0)
+				continue;
+			interface.push_back(inter);
+		}
+	}
+	fclose(fp_dev);
+
+	/// 根据网络接口获取每个接口对应的IP
+	//	然后和nodes中得到的IP进行比对，
+	vector<string>::iterator it;
+	vector<string>::iterator it_nodes;
+	for (it = interface.begin(); it != interface.end(); it++)
+	{
+		string dev_ip;
+		if (ip_by_interface(*it,dev_ip) < 0)
+			continue;
+		for (it_nodes = nodes_ip.begin();
+				it_nodes != nodes_ip.end(); it_nodes++)
+		{
+			if (dev_ip == *it_nodes)
+			{
+				ip = dev_ip;
+				return 0;
+			}
+		}
+	}
+	return -1;
 }
 
 /*
@@ -495,6 +650,7 @@ int parse_file(vector<string> &ip,vector<int> &nfs_port,
 	char line[1024] = {0};
 	while(!feof(fp))
 	{
+		memset(line,0,sizeof(line));
 		if(fgets(line,sizeof(line),fp) != NULL)
 		{
 			for (it_data = data.begin(); it_data != data.end(); it_data++)
