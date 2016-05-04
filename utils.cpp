@@ -14,10 +14,249 @@
 #include <net/if_arp.h>
 #include <arpa/inet.h>
 
-using namespace std;
 
-#define		FILE_PATH 		"/proc/net/nf_conntrack"
-#define		NODES_FILE		"/etc/ctdb/nodes"
+#define		LINKS_FILE_PATH 			"/proc/net/nf_conntrack"
+#define		NODES_FILE					"/etc/ctdb/nodes"
+#define		INIFILE_PATH				"/root/example.xml"
+#define		INTERVAL_STRING_SEND		"Send"
+#define		INTERVAL_STRING_COLLECT		"Collect"
+#define		PROTOCOL_STRING_CIFS		"CIFS"
+#define		PROTOCOL_STRING_NFS			"NFS"
+
+#define 	DATA_TYPE_LINKNUM	1
+#define		PROTOCOL_VERSION	"1.0"
+#define		DEFINED_OID			".1.3.6.1.4.1.16550"
+
+oid objid_sysuptime[] 		= { 1, 3, 6, 1, 2, 1, 1, 3, 0 }; 
+oid objid_snmptrap[] 		= { 1, 3, 6, 1, 6, 3, 1, 1, 4, 1, 0 }; 
+oid objid_proto_version[] 	= { 1, 3, 6, 1, 4, 1, 16550, 0  }; 
+oid objid_current_time[] 	= { 1, 3, 6, 1, 4, 1, 16550, 1  }; 
+oid objid_data_type[] 		= { 1, 3, 6, 1, 4, 1, 16550, 2  }; 
+oid objid_device_ip[] 		= { 1, 3, 6, 1, 4, 1, 16550, 3  }; 
+oid objid_data_length[] 	= { 1, 3, 6, 1, 4, 1, 16550, 4  }; 
+oid objid_virtual_ip[] 		= { 1, 3, 6, 1, 4, 1, 16550, 5  }; 
+oid objid_nfs_links[] 		= { 1, 3, 6, 1, 4, 1, 16550, 6  }; 
+oid objid_cifs_links[] 		= { 1, 3, 6, 1, 4, 1, 16550, 7  }; 
+
+using namespace std;
+struct XmlData xml_data;
+netsnmp_session *ss = NULL;
+netsnmp_pdu *pdu = NULL;
+
+/*
+ *	通过传入的node当前节点，解析XML中protocol子节点中的port字段
+ *	并将port放入结构体xml_data中。
+ * */
+static void deal_xml_protocol(xmlNodePtr curnode)
+{
+	xmlNodePtr propnode = curnode;									///	属性节点
+	if (xmlHasProp(curnode,BAD_CAST "name"))
+		propnode = curnode;
+	xmlAttrPtr attrptr = propnode->properties;
+	while(attrptr != NULL)
+	{
+		if (!xmlStrcmp(attrptr->name,BAD_CAST "name"))					/// 比较属性的名称是name
+		{
+			xmlChar *attrkey = xmlGetProp(propnode,BAD_CAST "name");	/// 获取节点属性的值
+			xmlChar *key = xmlNodeGetContent(curnode);					/// 获取节点的值
+			if (key)
+			{
+				/// 处理CIFS协议
+				if (!strcmp((char*)attrkey,PROTOCOL_STRING_CIFS))		/// 节点属性为CIFS
+				{
+					xmlNodePtr temp = curnode->xmlChildrenNode;			/// 指向CIFS的子节点
+					while(temp != NULL)
+					{
+						if (!xmlStrcmp(temp->name,BAD_CAST "Port"))		/// 获取多个Port的值
+						{
+							xmlChar *childkey = xmlNodeGetContent(temp);
+							if (childkey)
+							{
+								xml_data.cifs_port.push_back(atoi((char*)childkey));		/// 放入向量中
+								xmlFree(childkey);
+							}
+						}
+						temp = temp->next;
+					}
+				}
+				/// 处理NFS协议
+				if (!strcmp((char*)attrkey,PROTOCOL_STRING_NFS))		/// 节点属性为CIFS
+				{
+					xmlNodePtr temp = curnode->xmlChildrenNode;			/// 指向CIFS的子节点
+					while(temp != NULL)
+					{
+						if (!xmlStrcmp(temp->name,BAD_CAST "Port"))		/// 获取多个Port的值
+						{
+							xmlChar *childkey = xmlNodeGetContent(temp);
+							if (childkey)
+							{
+								xml_data.nfs_port.push_back(atoi((char*)childkey));		/// 放入向量中
+								xmlFree(childkey);
+							}
+						}
+						temp = temp->next;
+					}
+				}
+				xmlFree(key);
+			}
+			if (attrkey)
+				xmlFree(attrkey);
+		}
+		attrptr = attrptr->next;
+	}
+}
+
+/*
+ *	通过传入的node当前节点，解析XML中snmp子节点中的所有字段
+ *	并将所有字段值放入结构体xml_data中。
+ * */
+static void deal_xml_snmp(xmlNodePtr curnode)
+{
+	xmlNodePtr 	childnode = curnode->xmlChildrenNode;
+	while(childnode != NULL)
+	{
+		if (!xmlStrcmp(childnode->name,BAD_CAST "Dst_ip"))
+		{
+			xmlChar *key = xmlNodeGetContent(childnode);						/// 获取节点的值
+			if (key)
+			{
+				xml_data.dst_ip = string((char *)key);
+				xmlFree(key);
+			}
+		}
+
+		if (!xmlStrcmp(childnode->name,BAD_CAST "Dst_port"))
+		{
+			xmlChar *key = xmlNodeGetContent(childnode);						/// 获取节点的值
+			if (key)
+			{
+				xml_data.dst_port = atoi((char *)key);
+				xmlFree(key);
+			}
+		}
+
+		if (!xmlStrcmp(childnode->name,BAD_CAST "Community"))
+		{
+			xmlChar *key = xmlNodeGetContent(childnode);						/// 获取节点的值
+			if (key)
+			{
+				xml_data.community = string((char *)key);
+				xmlFree(key);
+			}
+		}
+
+		if (!xmlStrcmp(childnode->name,BAD_CAST "Version"))
+		{
+			xmlChar *key = xmlNodeGetContent(childnode);						/// 获取节点的值
+			if (key)
+			{
+				xml_data.version = atoi((char *)key);
+				xmlFree(key);
+			}
+		}
+		childnode = childnode->next;
+	}
+}
+
+/*
+ *	通过传入的node当前节点，解析XML中interval子节点中的所有字段
+ *	并将collect_interval、send_interval放入结构体xml_data中。
+ * */
+static void deal_xml_interval(xmlNodePtr curnode)
+{
+	xmlNodePtr propnode = curnode;									///	属性节点
+	if (xmlHasProp(curnode,BAD_CAST "name"))
+		propnode = curnode;
+	xmlAttrPtr attrptr = propnode->properties;
+	while(attrptr != NULL)
+	{
+		if (!xmlStrcmp(attrptr->name,BAD_CAST "name"))
+		{
+			xmlChar *attrkey = xmlGetProp(propnode,BAD_CAST "name");
+			xmlChar *key = xmlNodeGetContent(curnode);						/// 获取节点的值
+			if (key)
+			{
+				if (!strcmp((char*)attrkey,INTERVAL_STRING_SEND))	///	获取Send的值
+					xml_data.send_interval = atoi((char*)key);
+				if (!strcmp((char*)attrkey,INTERVAL_STRING_COLLECT))	///	获取Collect的值
+					xml_data.collect_interval = atoi((char*)key);
+				xmlFree(key);
+			}
+			if (attrkey)
+				xmlFree(attrkey);
+		}
+		attrptr = attrptr->next;
+	}
+}
+
+
+/*
+ *	检测结构体xml_data中的数据是否是期望值
+ *	返回值：
+ *		成功返回0，失败返回-1
+ * */
+static int check_xmlfile(void)
+{
+	if (xml_data.collect_interval <= 0 ||
+		xml_data.send_interval <= 0 ||
+		xml_data.dst_port <= 0 ||
+		xml_data.version != 2 ||
+		xml_data.dst_ip.empty() ||
+		xml_data.community.empty() ||
+		xml_data.cifs_port.empty() ||
+		xml_data.nfs_port.empty()
+		)
+		return -1;
+}
+
+/*
+ *	检测XML文件并解析文件，
+ *	将解析到的数据放入结构体xml_data中
+ *	返回值：
+ *		成功返回0，失败返回-1
+ * */
+int check_parse_xmlfile(void)
+{
+	memset(&xml_data,0,sizeof(struct XmlData));
+
+	xmlDocPtr 	doc;
+	xmlNodePtr 	curnode;
+	doc = xmlReadFile(INIFILE_PATH,"UTF-8",XML_PARSE_RECOVER);		/// 指定文件格式
+	if (NULL == doc)
+		return -1;
+
+	xmlKeepBlanksDefault(0);										/// 忽略空白
+	curnode = xmlDocGetRootElement(doc);							///	获得根节点
+	if (NULL == curnode)
+	{
+		xmlFreeDoc(doc);
+		return -1;
+	}
+
+	if (xmlStrcmp(curnode->name,BAD_CAST "Numconn"))				///	对比根节点是否是期望值
+	{
+		xmlFreeDoc(doc);
+		return -1;
+	}
+	
+	curnode = curnode->xmlChildrenNode;								///	指向根节点的子节点
+	while(curnode != NULL)
+	{
+		/// 处理Protocol子节点
+		if (!xmlStrcmp(curnode->name,BAD_CAST "Protocol"))
+			deal_xml_protocol(curnode);
+		/// 处理snmp子节点
+		if (!xmlStrcmp(curnode->name,BAD_CAST "Snmp"))
+			deal_xml_snmp(curnode);
+		/// 处理interval子节点
+		if (!xmlStrcmp(curnode->name,BAD_CAST "Interval"))
+			deal_xml_interval(curnode);
+		curnode = curnode->next;
+	}
+	xmlFreeDoc(doc);
+	return check_xmlfile();
+}
+
 
 /*
  *	通过CTDB获取节点主机的虚拟IP
@@ -27,6 +266,8 @@ using namespace std;
 int get_virip(vector<string> &ip)
 {
 	ip.clear();
+	ip.push_back("192.168.1.4");
+	return 0;
 	///	打开ctdb ip 并获取第一行数据的节点号
 	FILE *fp = popen("/etc/init.d/ctdb ip","r");
 	if (NULL == fp)
@@ -128,6 +369,8 @@ int ip_by_interface(string &interface,string &ip)
 int get_device_ip(std::string &ip)
 {
 	ip.clear();
+	ip = "192.168.1.4";
+	return 0;
 	FILE *fp = fopen(NODES_FILE,"r");
 	if (fp == NULL)
 	{
@@ -190,384 +433,6 @@ int get_device_ip(std::string &ip)
 }
 
 /*
- *	根据协议获取旗下的端口号
- *	参数：	protocol传入的协议字符串，
- *			port，存储该协议的多个端口号的值
- *	返回值：成功返回0，失败返回-1
- * */
-int get_port_by_protocol(const char *protocol,vector<int> &port)
-{
-	xmlDocPtr 	doc;
-	xmlNodePtr 	curnode;
-	port.clear();													/// 清空向量
-	doc = xmlReadFile(INIFILE_PATH,"GB2312",XML_PARSE_RECOVER);		/// 指定文件格式
-	if (NULL == doc)
-		return -1;
-
-	xmlKeepBlanksDefault(0);										/// 忽略空白
-	curnode = xmlDocGetRootElement(doc);							///	获得根节点
-	if (NULL == curnode)
-	{
-		xmlFreeDoc(doc);
-		return -1;
-	}
-
-	if (xmlStrcmp(curnode->name,BAD_CAST "Numconn"))				///	对比根节点是否是期望值
-	{
-		xmlFreeDoc(doc);
-		return -1;
-	}
-	
-	curnode = curnode->xmlChildrenNode;								///	指向根节点的子节点
-	xmlNodePtr propnode = curnode;									///	属性节点
-	
-	while(curnode != NULL)
-	{
-		/// 处理Protocol子节点
-		if (!xmlStrcmp(curnode->name,BAD_CAST "Protocol"))
-		{
-			if (xmlHasProp(curnode,BAD_CAST "name"))
-				propnode = curnode;
-			xmlAttrPtr attrptr = propnode->properties;
-			while(attrptr != NULL)
-			{
-				if (!xmlStrcmp(attrptr->name,BAD_CAST "name"))					/// 比较属性的名称是name
-				{
-					xmlChar *attrkey = xmlGetProp(propnode,BAD_CAST "name");	/// 获取节点属性的值
-					xmlChar *key = xmlNodeGetContent(curnode);					/// 获取节点的值
-					if (key)
-					{
-						/// 处理协议
-						if (!strcmp((char*)attrkey,protocol))		/// 节点属性为CIFS
-						{
-							xmlNodePtr temp = curnode->xmlChildrenNode;			/// 指向CIFS的子节点
-							while(temp != NULL)
-							{
-								if (!xmlStrcmp(temp->name,BAD_CAST "Port"))		/// 获取多个Port的值
-								{
-									xmlChar *childkey = xmlNodeGetContent(temp);
-									if (childkey)
-									{
-										port.push_back(atoi((char*)childkey));		/// 放入向量中
-										xmlFree(childkey);
-									}
-								}
-								temp = temp->next;
-							}
-						}
-						xmlFree(key);
-					}
-					if (attrkey)
-						xmlFree(attrkey);
-				}
-				attrptr = attrptr->next;
-			}
-		}
-		curnode = curnode->next;
-	}
-	xmlFreeDoc(doc);
-	return 0;
-}
-
-/*
- *	从XML配置文件中获取到时间间隔
- *	参数：
- *		interval 期望获取到的时间间隔字符串
- *		目前只有utils.h中的两个字符串宏
- *	返回值：
- *		成功返回时间间隔，失败返回-1
- * */
-int get_interval(const char *interval)
-{
-	xmlDocPtr 	doc;
-	xmlNodePtr 	curnode;
-	doc = xmlReadFile(INIFILE_PATH,"GB2312",XML_PARSE_RECOVER);		/// 指定文件格式
-	if (NULL == doc)
-		return -1;
-
-	xmlKeepBlanksDefault(0);										/// 忽略空白
-	curnode = xmlDocGetRootElement(doc);							///	获得根节点
-	if (NULL == curnode)
-	{
-		xmlFreeDoc(doc);
-		return -1;
-	}
-
-	if (xmlStrcmp(curnode->name,BAD_CAST "Numconn"))				///	对比根节点是否是期望值
-	{
-		xmlFreeDoc(doc);
-		return -1;
-	}
-	
-	int ret = -1;
-	curnode = curnode->xmlChildrenNode;								///	指向根节点的子节点
-	xmlNodePtr propnode = curnode;									///	属性节点
-
-	while(curnode != NULL)
-	{
-		/// 处理Interval子节点
-		if (!xmlStrcmp(curnode->name,BAD_CAST "Interval"))
-		{
-			if (xmlHasProp(curnode,BAD_CAST "name"))
-				propnode = curnode;
-			xmlAttrPtr attrptr = propnode->properties;
-			while(attrptr != NULL)
-			{
-				if (!xmlStrcmp(attrptr->name,BAD_CAST "name"))
-				{
-					xmlChar *attrkey = xmlGetProp(propnode,BAD_CAST "name");
-					xmlChar *key = xmlNodeGetContent(curnode);						/// 获取节点的值
-					if (key)
-					{
-						if (!strcmp((char*)attrkey,interval))	///	获取Collect的值
-							ret = atoi((char *)key);
-						xmlFree(key);
-					}
-					if (attrkey)
-						xmlFree(attrkey);
-				}
-				attrptr = attrptr->next;
-			}
-		}
-		curnode = curnode->next;
-	}
-	xmlFreeDoc(doc);
-	return ret;
-}
-
-/*
- *	解析XML配置文件获取目的IP
- *	返回值：
- *		成功返回0，失败返回-1
- * */
-int get_dstip(string &ip)
-{
-	xmlDocPtr 	doc;
-	xmlNodePtr 	curnode;
-	doc = xmlReadFile(INIFILE_PATH,"GB2312",XML_PARSE_RECOVER);		/// 指定文件格式
-	if (NULL == doc)
-		return -1;
-
-	xmlKeepBlanksDefault(0);										/// 忽略空白
-	curnode = xmlDocGetRootElement(doc);							///	获得根节点
-	if (NULL == curnode)
-	{
-		xmlFreeDoc(doc);
-		return -1;
-	}
-
-	if (xmlStrcmp(curnode->name,BAD_CAST "Numconn"))				///	对比根节点是否是期望值
-	{
-		xmlFreeDoc(doc);
-		return -1;
-	}
-	
-	int ret = -1;
-	curnode = curnode->xmlChildrenNode;								///	指向根节点的子节点
-
-	while(curnode != NULL)
-	{
-		/// 处理Interval子节点
-		if (!xmlStrcmp(curnode->name,BAD_CAST "Snmp"))
-		{
-			xmlNodePtr 	childnode = curnode->xmlChildrenNode;
-			while(childnode != NULL)
-			{
-				if (!xmlStrcmp(childnode->name,BAD_CAST "Dst_ip"))
-				{
-					xmlChar *key = xmlNodeGetContent(childnode);						/// 获取节点的值
-					if (key)
-					{
-						ip = string((char *)key);
-						ret = 0;
-						xmlFree(key);
-						break;
-					}
-				}
-				childnode = childnode->next;
-			}
-		}
-		curnode = curnode->next;
-	}
-	xmlFreeDoc(doc);
-	return ret;
-}
-
-
-/*
- *	解析XML配置文件获取目的端口
- *	返回值：
- *		成功返回端口号，失败返回-1
- * */
-int get_dstport(void)
-{
-	xmlDocPtr 	doc;
-	xmlNodePtr 	curnode;
-	doc = xmlReadFile(INIFILE_PATH,"GB2312",XML_PARSE_RECOVER);		/// 指定文件格式
-	if (NULL == doc)
-		return -1;
-
-	xmlKeepBlanksDefault(0);										/// 忽略空白
-	curnode = xmlDocGetRootElement(doc);							///	获得根节点
-	if (NULL == curnode)
-	{
-		xmlFreeDoc(doc);
-		return -1;
-	}
-
-	if (xmlStrcmp(curnode->name,BAD_CAST "Numconn"))				///	对比根节点是否是期望值
-	{
-		xmlFreeDoc(doc);
-		return -1;
-	}
-	
-	int ret = -1;
-	curnode = curnode->xmlChildrenNode;								///	指向根节点的子节点
-
-	while(curnode != NULL)
-	{
-		/// 处理Interval子节点
-		if (!xmlStrcmp(curnode->name,BAD_CAST "Snmp"))
-		{
-			xmlNodePtr 	childnode = curnode->xmlChildrenNode;
-			while(childnode != NULL)
-			{
-				if (!xmlStrcmp(childnode->name,BAD_CAST "Dst_port"))
-				{
-					xmlChar *key = xmlNodeGetContent(childnode);						/// 获取节点的值
-					if (key)
-					{
-						ret = atoi((char*)key);
-						xmlFree(key);
-						break;
-					}
-				}
-				childnode = childnode->next;
-			}
-		}
-		curnode = curnode->next;
-	}
-	xmlFreeDoc(doc);
-	return ret;
-}
-
-
-/*
- *	解析XML配置文件获取snmp的版本号
- *	返回值：
- *		成功返回版本号，失败返回-1
- * */
-int get_version(void)
-{
-	xmlDocPtr 	doc;
-	xmlNodePtr 	curnode;
-	doc = xmlReadFile(INIFILE_PATH,"GB2312",XML_PARSE_RECOVER);		/// 指定文件格式
-	if (NULL == doc)
-		return -1;
-
-	xmlKeepBlanksDefault(0);										/// 忽略空白
-	curnode = xmlDocGetRootElement(doc);							///	获得根节点
-	if (NULL == curnode)
-	{
-		xmlFreeDoc(doc);
-		return -1;
-	}
-
-	if (xmlStrcmp(curnode->name,BAD_CAST "Numconn"))				///	对比根节点是否是期望值
-	{
-		xmlFreeDoc(doc);
-		return -1;
-	}
-	
-	int ret = -1;
-	curnode = curnode->xmlChildrenNode;								///	指向根节点的子节点
-
-	while(curnode != NULL)
-	{
-		/// 处理Interval子节点
-		if (!xmlStrcmp(curnode->name,BAD_CAST "Snmp"))
-		{
-			xmlNodePtr 	childnode = curnode->xmlChildrenNode;
-			while(childnode != NULL)
-			{
-				if (!xmlStrcmp(childnode->name,BAD_CAST "Version"))
-				{
-					xmlChar *key = xmlNodeGetContent(childnode);						/// 获取节点的值
-					if (key)
-					{
-						ret = atoi((char*)key);
-						xmlFree(key);
-						break;
-					}
-				}
-				childnode = childnode->next;
-			}
-		}
-		curnode = curnode->next;
-	}
-	xmlFreeDoc(doc);
-	return ret;
-}
-
-/*
- *	解析XML配置文件获取snmp的通讯密码
- *	返回值：
- *		成功返回0，失败返回-1
- * */
-int get_community(string &community)
-{
-	xmlDocPtr 	doc;
-	xmlNodePtr 	curnode;
-	doc = xmlReadFile(INIFILE_PATH,"GB2312",XML_PARSE_RECOVER);		/// 指定文件格式
-	if (NULL == doc)
-		return -1;
-
-	xmlKeepBlanksDefault(0);										/// 忽略空白
-	curnode = xmlDocGetRootElement(doc);							///	获得根节点
-	if (NULL == curnode)
-	{
-		xmlFreeDoc(doc);
-		return -1;
-	}
-
-	if (xmlStrcmp(curnode->name,BAD_CAST "Numconn"))				///	对比根节点是否是期望值
-	{
-		xmlFreeDoc(doc);
-		return -1;
-	}
-	
-	int ret = -1;
-	curnode = curnode->xmlChildrenNode;								///	指向根节点的子节点
-
-	while(curnode != NULL)
-	{
-		/// 处理Interval子节点
-		if (!xmlStrcmp(curnode->name,BAD_CAST "Snmp"))
-		{
-			xmlNodePtr 	childnode = curnode->xmlChildrenNode;
-			while(childnode != NULL)
-			{
-				if (!xmlStrcmp(childnode->name,BAD_CAST "Community"))
-				{
-					xmlChar *key = xmlNodeGetContent(childnode);						/// 获取节点的值
-					if (key)
-					{
-						community = string((char*)key);
-						xmlFree(key);
-						ret = 0;
-						break;
-					}
-				}
-				childnode = childnode->next;
-			}
-		}
-		curnode = curnode->next;
-	}
-	xmlFreeDoc(doc);
-	return ret;
-}
-
-/*
  *	检测该行是否条件
  *	参数：
  *		line：该行字符串，ip：目的IP，port：目的端口
@@ -575,12 +440,12 @@ int get_community(string &community)
  *		成功返回true，失败返回false
  *
  * */
-static bool check_line(const char *line,const char *ip,int port)
+static bool check_line(const char *line,string ip,int port)
 {
 	
 	if (line == NULL || 
 			line[0] == '\0' ||
-			ip[0] == '\0' || port <= 0)
+			ip.empty() || port <= 0)
 		return false;
 	
 	char *pline = strdup(line);
@@ -593,7 +458,7 @@ static bool check_line(const char *line,const char *ip,int port)
 		///	先判断目的IP是否匹配，
 		if (!strncmp(pitem,"dst=",strlen("dst=")))
 		{
-			if (string(pitem) != string("dst=") + string(ip))
+			if (string(pitem) != string("dst=") + ip)
 				break;
 		}
 		/// 再判断目的端口是否匹配
@@ -622,28 +487,28 @@ static bool check_line(const char *line,const char *ip,int port)
  *		传出：data
  *	成功返回0，失败返回-1
  * */
-int parse_file(vector<string> &ip,vector<int> &nfs_port,
-		vector<int> &cifs_port,vector<struct conn_data> &data)
+int parse_links_file(vector<string> &ip,vector<int> &nfs_port,
+		vector<int> &cifs_port,vector<struct LinkNum> &data)
 {
 	if (ip.empty() || 
 			(nfs_port.empty() && cifs_port.empty()))
 		return -1;
 	data.clear();
 
-	FILE *fp = fopen(FILE_PATH,"r");
+	FILE *fp = fopen(LINKS_FILE_PATH,"r");
 	if (fp == NULL)
 		return -1;
 	
 	vector<string>::iterator it_ip;
 	vector<int>::iterator it_port;
-	vector<struct conn_data>::iterator it_data;
+	vector<struct LinkNum>::iterator it_data;
 
-	/// 根据虚拟IP的个数初始化好conn_data向量，以方便解析文件时统计连接数
+	/// 根据虚拟IP的个数初始化好LinkNum向量，以方便解析文件时统计连接数
 	for (it_ip = ip.begin(); it_ip != ip.end(); it_ip++)
 	{
-		struct conn_data t_data;
+		struct LinkNum t_data;
 		memset(&t_data,0,sizeof(t_data));
-		strcpy(t_data.ip,(*it_ip).c_str());
+		t_data.virip = *it_ip;
 		data.push_back(t_data);
 	}
 
@@ -657,15 +522,104 @@ int parse_file(vector<string> &ip,vector<int> &nfs_port,
 			{
 				/// 统计NFS的连接数
 				for (it_port = nfs_port.begin(); it_port != nfs_port.end(); it_port++)
-					if (check_line(line,(*it_data).ip,*it_port))				/// 检测该行是否符合目的地址是ip，目的端口是port
-						(*it_data).nfs_conn++;
+					if (check_line(line,(*it_data).virip,*it_port))				/// 检测该行是否符合目的地址是ip，目的端口是port
+						(*it_data).nfs_links++;
 				/// 统计CIFS的连接数
 				for (it_port = cifs_port.begin(); it_port != cifs_port.end(); it_port++)
-					if (check_line(line,(*it_data).ip,*it_port))				/// 检测该行是否符合目的地址是ip，目的端口是port
-						(*it_data).cifs_conn++;
+					if (check_line(line,(*it_data).virip,*it_port))				/// 检测该行是否符合目的地址是ip，目的端口是port
+						(*it_data).cifs_links++;
 			}
 		}
 	}
 	fclose(fp);
 	return 0;
 }
+
+/*
+ *	初始化snmp并填充pdu的初始部分
+ *	成功返回0，失败返回-1
+ * */
+int init_snmp_pdu(string &dst_ip,int dst_port,
+		string &community,string &device_ip)
+{
+	if (dst_ip.empty() || dst_port <= 0 
+			|| community.empty() ||
+			device_ip.empty())
+		return -1;
+	init_snmp("send_linknum");
+	struct snmp_session session;
+	snmp_sess_init(&session);
+	
+	char peername[32] = {0};
+	char comm[16] = {0};
+	char dev_ip[16] = {0};
+
+	sprintf(peername,"%s:%d",dst_ip.c_str(),dst_port);
+	strncpy(comm,community.c_str(),sizeof(comm));
+	strncpy(dev_ip,device_ip.c_str(),sizeof(dev_ip));
+
+	session.version = SNMP_VERSION_2c;
+	session.peername = peername;
+	session.community = (unsigned char *)comm;
+	session.community_len = strlen(comm);
+	ss = snmp_open(&session);
+	if (ss == NULL)
+	{
+		snmp_perror("snmp_open");
+		return -1;
+	}
+	
+	pdu = snmp_pdu_create(SNMP_MSG_TRAP2);
+	if (NULL == pdu)
+	{
+		snmp_perror("snmp_pdu_create");
+		return -1;
+	}
+
+	char systimebuf[128] = {0};
+	char timebuf[128] = {0};
+	char data_typebuf[24] = {0};
+	sprintf(systimebuf,"%ld",get_uptime());
+	sprintf(timebuf,"%ld",time(NULL));
+	sprintf(data_typebuf,"%ld",DATA_TYPE_LINKNUM);
+
+	/// 以下的元素增加有顺序之说，不应随意变动
+	snmp_add_var(pdu,objid_sysuptime,sizeof(objid_sysuptime)/sizeof(oid),'t',systimebuf);
+	snmp_add_var(pdu,objid_snmptrap,sizeof(objid_snmptrap)/sizeof(oid),'o',DEFINED_OID);
+	snmp_add_var(pdu,objid_proto_version,sizeof(objid_proto_version)/sizeof(oid),'s',PROTOCOL_VERSION);
+	snmp_add_var(pdu,objid_current_time,sizeof(objid_current_time)/sizeof(oid),'i',timebuf);
+	snmp_add_var(pdu,objid_data_type,sizeof(objid_data_type)/sizeof(oid),'i',data_typebuf);
+	snmp_add_var(pdu,objid_device_ip,sizeof(objid_device_ip)/sizeof(oid),'s',dev_ip);
+	
+	return 0;
+}
+
+/*
+ *	根据向量data中的连接数，填充pdu
+ *	成功返回0，失败返回-1
+ * */
+int create_pdu(vector<struct LinkNum> &data)
+{
+	if (pdu == NULL || data.empty())
+		return -1;
+	
+	char lengthbuf[1024];
+	memset(lengthbuf,0,sizeof(lengthbuf));
+	int total_length = data.size() * sizeof(struct LinkNum);
+	sprintf(lengthbuf,"%d",total_length);
+	snmp_add_var(pdu,objid_data_length,sizeof(objid_data_length)/sizeof(oid),'i',lengthbuf);
+
+	vector<struct LinkNum>::iterator it;
+	for( it = data.begin(); it != data.end(); it++)
+	{
+		char cifsbuf[64] = {0};
+		char nfsbuf[64] = {0};
+		sprintf(cifsbuf,"%d",it->cifs_links);
+		sprintf(nfsbuf,"%d",it->nfs_links);
+		snmp_add_var(pdu,objid_virtual_ip,sizeof(objid_virtual_ip)/sizeof(oid),'s',it->virip.c_str());
+		snmp_add_var(pdu,objid_nfs_links,sizeof(objid_nfs_links)/sizeof(oid),'i',cifsbuf);
+		snmp_add_var(pdu,objid_cifs_links,sizeof(objid_cifs_links)/sizeof(oid),'i',nfsbuf);
+	}
+	return 0;
+}
+

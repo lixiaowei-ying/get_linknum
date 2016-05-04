@@ -3,13 +3,42 @@
 
 #include <vector>
 #include <string>
+#include <net-snmp/net-snmp-config.h>
+#include <net-snmp/net-snmp-includes.h>
 
-#include "share_memory.h"
+/*
+ *	用于连接数收集和发送的数据结构
+ * */
+struct LinkNum{
+	std::string virip;				/// 虚拟IP
+	int cifs_links;				/// 协议CIFS的连接数
+	int nfs_links;				/// 协议NFS的连接数
+};
 
-#define		INIFILE_PATH				"/root/example.xml"
-#define		INTERVAL_SEND_STRING		"Send"
-#define		INTERVAL_COLLECT_STRING		"Collect"
+/*
+ *	通过读取XML配置文件，将数据放入到次结构体中，
+ *	方便连接数的收集和发送部分。
+ * */
+struct XmlData{
+	int collect_interval;
+	int send_interval;
+	std::string dst_ip;
+	int dst_port;
+	std::string community;
+	int version;
+	std::vector<int> cifs_port;
+	std::vector<int> nfs_port;
+};
 
+
+/*
+ *	检测XML文件并解析文件，
+ *	将解析到的数据放入结构体xmldata中
+ *	返回值：
+ *		成功返回0，失败返回-1
+ * */
+int check_parse_xmlfile(void);
+	
 /*
  *	通过CTDB获取节点主机的虚拟IP
  *	返回值：
@@ -25,55 +54,6 @@ int get_virip(std::vector<std::string> &ip);
 int get_device_ip(std::string &ip);
 
 /*
- *	根据协议获取旗下的端口号
- *	参数：	protocol传入的协议字符串，
- *			port，存储该协议的多个端口号的值
- *	返回值：成功返回0，失败返回-1
- * */
-int get_port_by_protocol(const char *protocol,std::vector<int> &port);
-
-
-/*
- *	从XML配置文件中获取到时间间隔
- *	参数：
- *		interval 期望获取到的时间间隔字符串
- *	返回值：
- *		成功返回时间间隔，失败返回-1
- * */
-int get_interval(const char *interval);
-
-
-/*
- *	解析XML配置文件获取目的IP
- *	返回值：
- *		成功返回0，失败返回-1
- * */
-int get_dstip(std::string &ip);
-
-
-/*
- *	解析XML配置文件获取目的端口
- *	返回值：
- *		成功返回端口号，失败返回-1
- * */
-int get_dstport(void);
-
-/*
- *	解析XML配置文件获取snmp的版本号
- *	返回值：
- *		成功返回版本号，失败返回-1
- * */
-int get_version(void);
-
-/*
- *	解析XML配置文件获取snmp的通讯密码
- *	返回值：
- *		成功返回0，失败返回-1
- * */
-int get_community(std::string &community);
-
-
-/*
  *	根据传入参数ip和port对文件进行解析过滤
  *	获取到每个虚拟IP对应的连接数
  *	参数：
@@ -81,7 +61,22 @@ int get_community(std::string &community);
  *		传出：data
  *	成功返回0，失败返回-1
  * */
-int parse_file(std::vector<std::string> &ip,std::vector<int> &nfs_port,
-		std::vector<int> &cifs_port,std::vector<struct conn_data> &data);
+int parse_links_file(std::vector<std::string> &ip,
+		std::vector<int> &nfs_port,std::vector<int> &cifs_port,
+		std::vector<struct LinkNum> &data);
+
+
+/*
+ *	初始化snmp并填充pdu的初始部分
+ *	成功返回0，失败返回-1
+ * */
+int init_snmp_pdu(std::string &dst_ip,int dst_port,
+		std::string &community,std::string &device_ip);
+
+/*
+ *	根据向量data中的连接数，填充pdu
+ *	成功返回0，失败返回-1
+ * */
+int create_pdu(std::vector<struct LinkNum> &data);
 
 #endif 		//__UTILS_H__
