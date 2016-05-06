@@ -18,6 +18,7 @@
 #define		LINKS_FILE_PATH 			"/proc/net/nf_conntrack"
 #define		NODES_FILE					"/etc/ctdb/nodes"
 #define		INIFILE_PATH				"/root/example.xml"
+#define		CTDB_IP_COMMAND				"/usr/bin/ctdb ip"
 #define		INTERVAL_STRING_SEND		"Send"
 #define		INTERVAL_STRING_COLLECT		"Collect"
 #define		PROTOCOL_STRING_CIFS		"CIFS"
@@ -269,23 +270,23 @@ int get_virip(vector<string> &ip)
 	ip.push_back("192.168.1.4");
 	return 0;
 	///	打开ctdb ip 并获取第一行数据的节点号
-	FILE *fp = popen("/etc/init.d/ctdb ip","r");
+	FILE *fp = popen(CTDB_IP_COMMAND,"r");
 	if (NULL == fp)
 	{
-		syslog(LOG_ERR,"/etc/init.d/ctdb ip execute failed");
+		syslog(LOG_ERR,"%s execute failed",CTDB_IP_COMMAND);
 		return -1;
 	}
 	char line[1024] = {0};
 	int node = -1;
 	if (fgets(line,sizeof(line),fp) == NULL)
 	{
-		syslog(LOG_ERR,"/etc/init.d/ctdb ip has not result");
+		syslog(LOG_ERR,"%s has not result",CTDB_IP_COMMAND);
 		pclose(fp);
 		return -1;
 	}
 	if (strstr(line,"Public IPs on node") == NULL)
 	{
-		syslog(LOG_ERR,"/etc/init.d/ctdb ip has wrong result");
+		syslog(LOG_ERR,"%s has wrong result",CTDB_IP_COMMAND);
 		pclose(fp);
 		return -1;
 	}
@@ -508,7 +509,7 @@ int parse_links_file(vector<string> &ip,vector<int> &nfs_port,
 	{
 		struct LinkNum t_data;
 		memset(&t_data,0,sizeof(t_data));
-		t_data.virip = *it_ip;
+		memcpy(t_data.virip,(*it_ip).c_str(),sizeof(t_data.virip));
 		data.push_back(t_data);
 	}
 
@@ -616,7 +617,7 @@ int create_pdu(vector<struct LinkNum> &data)
 		char nfsbuf[64] = {0};
 		sprintf(cifsbuf,"%d",it->cifs_links);
 		sprintf(nfsbuf,"%d",it->nfs_links);
-		snmp_add_var(pdu,objid_virtual_ip,sizeof(objid_virtual_ip)/sizeof(oid),'s',it->virip.c_str());
+		snmp_add_var(pdu,objid_virtual_ip,sizeof(objid_virtual_ip)/sizeof(oid),'s',it->virip);
 		snmp_add_var(pdu,objid_nfs_links,sizeof(objid_nfs_links)/sizeof(oid),'i',cifsbuf);
 		snmp_add_var(pdu,objid_cifs_links,sizeof(objid_cifs_links)/sizeof(oid),'i',nfsbuf);
 	}

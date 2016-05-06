@@ -75,7 +75,7 @@ void* pthread_send(void*)
 		vector<struct LinkNum>::iterator it;
 		for (it=temp_link.begin();it!=temp_link.end();it++)
 			printf("virtual ip :%s  cifs:%d  nfs:%d \n",
-					it->virip.c_str(),it->cifs_links,it->nfs_links);
+					it->virip,it->cifs_links,it->nfs_links);
 		sleep(xml_data.send_interval);
 	}
 	snmp_close(ss);

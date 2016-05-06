@@ -10,7 +10,7 @@
  *	用于连接数收集和发送的数据结构
  * */
 struct LinkNum{
-	std::string virip;				/// 虚拟IP
+	char virip[16];				/// 虚拟IP
 	int cifs_links;				/// 协议CIFS的连接数
 	int nfs_links;				/// 协议NFS的连接数
 };

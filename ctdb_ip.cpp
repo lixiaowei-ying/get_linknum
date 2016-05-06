@@ -12,7 +12,7 @@
 #include "ctdb_ip.h"
 
 #define		NODES_FILE			"/etc/ctdb/nodes"
-#define		CTDB_IP				"/etc/init.d/ctdb ip"
+#define		CTDB_IP_COMMAND		"/usr/bin/ctdb ip"
 #define		SEM_NAME			"sem_dev_virip"
 
 using namespace std;
@@ -35,7 +35,7 @@ vector<struct Dev_Virip> dev_virip;
  *	返回值：
  *		成功返回虚拟ip的格式，失败返回-1
  * */
-int virip_by_devip(const char *devip,char *virip[],size_t size)
+int virip_by_devip(const char *devip,char virip[][16],size_t size)
 {
 	if (devip == NULL)
 		return -1;
@@ -143,23 +143,23 @@ static int get_dev_virip(vector<struct Dev_Virip> &dev)
 		return -1;
 
 	///	打开ctdb ip 并获取第一行数据的节点号
-	FILE *fp = popen("/etc/init.d/ctdb ip","r");
+	FILE *fp = popen(CTDB_IP_COMMAND,"r");
 	if (NULL == fp)
 	{
-		syslog(LOG_ERR,"/etc/init.d/ctdb ip execute failed");
+		syslog(LOG_ERR,"%s execute failed",CTDB_IP_COMMAND);
 		return -1;
 	}
 
 	char line[1024] = {0};
 	if (fgets(line,sizeof(line),fp) == NULL)
 	{
-		syslog(LOG_ERR,"/etc/init.d/ctdb ip has not result");
+		syslog(LOG_ERR,"%s has not result",CTDB_IP_COMMAND);
 		pclose(fp);
 		return -1;
 	}
 	if (strstr(line,"Public IPs on node") == NULL)
 	{
-		syslog(LOG_ERR,"/etc/init.d/ctdb ip has wrong result");
+		syslog(LOG_ERR,"%s has wrong result",CTDB_IP_COMMAND);
 		pclose(fp);
 		return -1;
 	}

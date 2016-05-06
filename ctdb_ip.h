@@ -1,6 +1,9 @@
 #ifndef		__CTDB_IP_H__
 #define		__CTDB_IP_H__
 
+#include <semaphore.h>
+#include <sys/types.h>
+
 /*
  *	根据指定的物理ip获取他的所有虚拟ip
  *	参数：
@@ -11,7 +14,7 @@
  *	返回值：
  *		成功返回虚拟ip的格式，失败返回-1
  * */
-int virip_by_devip(const char *devip,char *virip[],size_t size);
+int virip_by_devip(const char *devip,char virip[][16],size_t size);
 
 /*
  *	根据指定的虚拟IP，获取对应的唯一的物理IP
