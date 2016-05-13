@@ -8,21 +8,15 @@
 #include <syslog.h>
 #include <vector>
 #include <string>
+#include <sys/types.h>
+#include <sys/mman.h>
 
 #include "ctdb_ip.h"
 
 #define		NODES_FILE			"/etc/ctdb/nodes"
 #define		CTDB_IP_COMMAND		"/usr/bin/ctdb ip"
-#define		SEM_NAME			"sem_dev_virip"
 
 using namespace std;
-
-struct Dev_Virip{
-	string devip;
-	vector<string> virip;
-};
-
-vector<struct Dev_Virip> dev_virip;
 
 
 /*
@@ -35,32 +29,46 @@ vector<struct Dev_Virip> dev_virip;
  *	返回值：
  *		成功返回虚拟ip的格式，失败返回-1
  * */
-int virip_by_devip(const char *devip,char virip[][16],size_t size)
+int virip_by_devip(const char *devip,char virip[][16])
 {
 	if (devip == NULL)
 		return -1;
-	vector<struct Dev_Virip> temp;
-	sem_t *sem = sem_open(SEM_NAME,O_RDWR);
-	if (sem == SEM_FAILED)
-	{
-		syslog(LOG_ERR,"sem open failed");
+	char *shmptr = shmopen();
+	if (shmptr == NULL)
 		return -1;
-	}
+	sem_t *sem = semopen();
+	if (sem == NULL)
+		return -1;
+	vector<struct Dev_Virip> temp;
+	int num = 0;
+	struct Dev_Virip *ptr = (struct Dev_Virip*)(shmptr+4);
 	sem_wait(sem);
-	temp = dev_virip;
+	memcpy(&num,shmptr,4);
+	for (int i = 0; i < num;i++)
+	{
+		struct Dev_Virip tempip;
+		memcpy(&tempip,ptr+i,sizeof(struct Dev_Virip));
+		temp.push_back(tempip);
+	}
 	sem_post(sem);
 	sem_close(sem);
+	munmap(shmptr,MAX_DEV_VIRIP * sizeof(struct Dev_Virip));
 	
 	vector<struct Dev_Virip>::iterator it;
 	for (it = temp.begin(); it != temp.end(); it++)
-		if (it->devip == string(devip))
+	{
+		/*
+		printf ("devip:%s\n",it->devip);
+		for (int j = 0; j < it->num; j++)
+			printf ("----virip:%s\n",it->virip[j]);
+			*/
+		if (strcmp(it->devip,devip) == 0)
 		{
-			if (size < it->virip.size())
-				return -1;
-			for (int i = 0; i < it->virip.size(); i++)
-				strcpy(virip[i],it->virip.at(i).c_str());
-			return it->virip.size();
+			for (int i = 0; i < it->num; i++)
+				strncpy(virip[i],it->virip[i],sizeof(it->virip[i]));
+			return it->num;
 		}
+	}
 	return -1;
 }
 
@@ -69,32 +77,40 @@ int virip_by_devip(const char *devip,char virip[][16],size_t size)
  *	参数：
  *		virip，传入的虚拟IP
  *		devip，用于存放虚拟IP对应的物理IP
- *		length，指定devip的长度，
  *	成功返回物理IP的指针，失败返回NULL
  * */
-char* devip_by_virip(const char *virip, char *devip,size_t length)
+char* devip_by_virip(const char *virip, char *devip)
 {
-	if (devip == NULL)
+	if (virip == NULL)
+		return NULL;
+	char *shmptr = shmopen();
+	if (shmptr == NULL)
+		return NULL;
+	sem_t *sem = semopen();
+	if (sem == NULL)
 		return NULL;
 	vector<struct Dev_Virip> temp;
-	sem_t *sem = sem_open(SEM_NAME,O_RDWR);
-	if (sem == SEM_FAILED)
-	{
-		syslog(LOG_ERR,"sem open failed");
-		return NULL;
-	}
+	int num = 0;
+	struct Dev_Virip *ptr = (struct Dev_Virip*)(shmptr+4);
 	sem_wait(sem);
-	temp = dev_virip;
+	memcpy(&num,shmptr,4);
+	for (int i = 0; i < num;i++)
+	{
+		struct Dev_Virip tempip;
+		memcpy(&tempip,ptr+i,sizeof(struct Dev_Virip));
+		temp.push_back(tempip);
+	}
 	sem_post(sem);
 	sem_close(sem);
+	munmap(shmptr,MAX_DEV_VIRIP * sizeof(struct Dev_Virip));
 	
 	vector<struct Dev_Virip>::iterator it;
 	for (it = temp.begin(); it != temp.end(); it++)
-		for (int i = 0; i < it->virip.size(); i++)
+		for (int i = 0; i < it->num; i++)
 		{
-			if (string(virip) == it->virip.at(i))
+			if (strcmp(virip,it->virip[i]) == 0)
 			{
-				strncpy(devip,it->devip.c_str(),length);
+				strncpy(devip,it->devip,strlen(it->devip));
 				return devip;
 			}
 		}
@@ -121,10 +137,13 @@ static int get_all_devip(vector<struct Dev_Virip> &dev)
 	{
 		char line[1024] = {0};
 		struct Dev_Virip tempip;
-		memset(&tempip,0,sizeof(struct Dev_Virip));
+		memset(&tempip,0,sizeof(tempip));
 		if (fgets(line,sizeof(line),fp) != NULL)
-			tempip.devip = string(line);
-		dev.push_back(tempip);
+		{
+			line[strlen(line)-1] = '\0';
+			strncpy(tempip.devip,line,strlen(line));
+			dev.push_back(tempip);
+		}
 	}
 	fclose(fp);
 	return 0;
@@ -139,7 +158,7 @@ static int get_all_devip(vector<struct Dev_Virip> &dev)
 static int get_dev_virip(vector<struct Dev_Virip> &dev)
 {
 	get_all_devip(dev);
-	if (dev_virip.empty())
+	if (dev.empty())
 		return -1;
 
 	///	打开ctdb ip 并获取第一行数据的节点号
@@ -164,7 +183,7 @@ static int get_dev_virip(vector<struct Dev_Virip> &dev)
 		return -1;
 	}
 
-	int index = 0;
+	int i = 0;
 	while (!feof(fp))
 	{
 		memset(line,0,sizeof(line));
@@ -185,12 +204,16 @@ static int get_dev_virip(vector<struct Dev_Virip> &dev)
 				return -1;
 			}
 			int node = atoi(tnode);
-			if (node > dev_virip.size() - 1)
+			if (node > dev.size() - 1)
 			{
 				pclose(fp);
 				return -1;
 			}
-			dev.at(node).virip.push_back(tip);
+			if (strlen(tip) > 15)
+				return -1;
+			strncpy(dev.at(node).virip[dev.at(node).num],tip,strlen(tip));
+			dev.at(node).num++;
+			i++;
 		}
 	}
 	pclose(fp);
@@ -202,14 +225,41 @@ static int get_dev_virip(vector<struct Dev_Virip> &dev)
  *	返回值：
  *		成功返回指针sem，失败返回NULL
  * */
-sem_t *init_sem(void)
+int shm_init(void)
 {
-	sem_t *sem = sem_open(SEM_NAME,O_CREAT|O_RDWR,666,1);
+	int fd = shm_open(SHM_NAME,O_CREAT | O_RDWR,666);
+	if (fd == -1)
+		return -1;
+	sem_t *sem = sem_open(SEM_NAME,O_CREAT | O_RDWR,666,1);
 	if (sem == SEM_FAILED)
 	{
-		syslog(LOG_ERR,"sem init failed");
-		return NULL;
+		close(fd);
+		return -1;
 	}
+	ftruncate(fd,4 + MAX_DEV_VIRIP * sizeof(struct Dev_Virip));
+	close(fd);
+	sem_close(sem);
+	return 0;
+}
+
+char *shmopen(void)
+{
+	int fd = shm_open(SHM_NAME,O_RDWR,666);
+	if (fd == -1)
+		return NULL;
+	char *shmptr = (char*)mmap(NULL,MAX_DEV_VIRIP*sizeof(struct Dev_Virip),
+			PROT_READ | PROT_WRITE,MAP_SHARED,fd,0);
+	close(fd);
+	if (shmptr == MAP_FAILED)
+		return NULL;
+	return shmptr;
+}
+
+sem_t *semopen(void)
+{
+	sem_t *sem = sem_open(SEM_NAME,O_RDWR);
+	if (sem == SEM_FAILED)
+		return NULL;
 	return sem;
 }
 
@@ -217,13 +267,21 @@ sem_t *init_sem(void)
  *	根据有名信号量将获取到的物理ip和虚拟IP放入全局变量dev_virip中
  *	成功返回0，失败返回-1
  * */
-int update_dev_virip(sem_t *sem)
+int update_dev_virip(char *shmptr,sem_t *sem)
 {
+	if (shmptr == NULL || sem == NULL)
+		return -1;
 	vector<struct Dev_Virip> dev;
 	if (get_dev_virip(dev) < 0)
 		return -1;
+	int num = dev.size();
 	sem_wait(sem);
-	dev_virip = dev;
+	memcpy(shmptr,&num,4);
+	struct Dev_Virip *ptr = (struct Dev_Virip*)(shmptr+4);
+	for (int i = 0; i < dev.size(); i++)
+		memcpy(ptr + i,&dev.at(i),sizeof(struct Dev_Virip));
 	sem_post(sem);
+	int a = 0;
+	memcpy(&a,shmptr,4);
 	return 0;
 }

@@ -3,7 +3,7 @@
 import os,sys,getopt
 from lxml import etree
 
-PATH_XML_FILE = "/root/links1.xml"
+PATH_XML_FILE = "/root/links.xml"
 
 def usage():
 	print sys.argv[0] + ' [options] [argments]'

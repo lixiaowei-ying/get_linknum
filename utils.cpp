@@ -17,7 +17,7 @@
 
 #define		LINKS_FILE_PATH 			"/proc/net/nf_conntrack"
 #define		NODES_FILE					"/etc/ctdb/nodes"
-#define		INIFILE_PATH				"/root/example.xml"
+#define		INIFILE_PATH				"/root/links.xml"
 #define		CTDB_IP_COMMAND				"/usr/bin/ctdb ip"
 #define		INTERVAL_STRING_SEND		"Send"
 #define		INTERVAL_STRING_COLLECT		"Collect"
@@ -218,7 +218,7 @@ static int check_xmlfile(void)
  * */
 int check_parse_xmlfile(void)
 {
-	memset(&xml_data,0,sizeof(struct XmlData));
+//	memset(&xml_data,0,sizeof(struct XmlData));		memset must not fit string
 
 	xmlDocPtr 	doc;
 	xmlNodePtr 	curnode;
@@ -267,8 +267,6 @@ int check_parse_xmlfile(void)
 int get_virip(vector<string> &ip)
 {
 	ip.clear();
-	ip.push_back("192.168.1.4");
-	return 0;
 	///	打开ctdb ip 并获取第一行数据的节点号
 	FILE *fp = popen(CTDB_IP_COMMAND,"r");
 	if (NULL == fp)
@@ -342,8 +340,8 @@ int ip_by_interface(string &interface,string &ip)
 		return -1;                  
 	}  
 
-	strncpy(ifr.ifr_name, interface.c_str(), IFNAMSIZ);  
-	ifr.ifr_name[IFNAMSIZ - 1] = 0;  
+	strncpy(ifr.ifr_name, interface.c_str(), IFNAMSIZ);
+	ifr.ifr_name[IFNAMSIZ - 1] = 0;
 
 	if (ioctl(sock, SIOCGIFADDR, &ifr) < 0)  
 	{  
@@ -352,8 +350,10 @@ int ip_by_interface(string &interface,string &ip)
 	}  
 
 	/// 将取得到的IP赋值给传出型参数ip
+	struct sockaddr_in sin;
+	memcpy(&sin,&ifr.ifr_addr,sizeof(sin));
 	char addr[INET_ADDRSTRLEN] = {0};
-	if (inet_ntop(AF_INET,&ifr.ifr_addr,addr,INET_ADDRSTRLEN))
+	if (inet_ntop(AF_INET,&sin.sin_addr,addr,INET_ADDRSTRLEN))
 		ip = string(addr);
 	close(sock);
 	return 0;  
@@ -370,8 +370,6 @@ int ip_by_interface(string &interface,string &ip)
 int get_device_ip(std::string &ip)
 {
 	ip.clear();
-	ip = "192.168.1.4";
-	return 0;
 	FILE *fp = fopen(NODES_FILE,"r");
 	if (fp == NULL)
 	{
@@ -384,15 +382,18 @@ int get_device_ip(std::string &ip)
 	{
 		char line[1024] = {0};
 		if (fgets(line,sizeof(line),fp) != NULL)
+		{
+			line[strlen(line)-1] = '\0';
 			nodes_ip.push_back(string(line));
+		}
 	}
 	fclose(fp);
 	
 	/// 读取/proc/net/dev文件，获取设备的所有网络接口
-	FILE *fp_dev = fopen("/prov/net/dev","r");
+	FILE *fp_dev = fopen("/proc/net/dev","r");
 	if (fp_dev == NULL)
 	{
-		syslog(LOG_ERR,"open /prov/net/dev failed");
+		syslog(LOG_ERR,"open /proc/net/dev failed");
 		return -1;
 	}
 	vector<string> interface;
@@ -417,6 +418,7 @@ int get_device_ip(std::string &ip)
 	vector<string>::iterator it_nodes;
 	for (it = interface.begin(); it != interface.end(); it++)
 	{
+		*it = (*it).substr((*it).find_first_not_of(' '),(*it).find_last_not_of(' ' ));
 		string dev_ip;
 		if (ip_by_interface(*it,dev_ip) < 0)
 			continue;
@@ -514,6 +516,7 @@ int parse_links_file(vector<string> &ip,vector<int> &nfs_port,
 	}
 
 	char line[1024] = {0};
+	int num = 0;
 	while(!feof(fp))
 	{
 		memset(line,0,sizeof(line));
@@ -547,7 +550,6 @@ int init_snmp_pdu(string &dst_ip,int dst_port,
 			|| community.empty() ||
 			device_ip.empty())
 		return -1;
-	init_snmp("send_linknum");
 	struct snmp_session session;
 	snmp_sess_init(&session);
 	
@@ -574,6 +576,7 @@ int init_snmp_pdu(string &dst_ip,int dst_port,
 	if (NULL == pdu)
 	{
 		snmp_perror("snmp_pdu_create");
+		snmp_close(ss);
 		return -1;
 	}
 
@@ -613,13 +616,13 @@ int create_pdu(vector<struct LinkNum> &data)
 	vector<struct LinkNum>::iterator it;
 	for( it = data.begin(); it != data.end(); it++)
 	{
-		char cifsbuf[64] = {0};
 		char nfsbuf[64] = {0};
-		sprintf(cifsbuf,"%d",it->cifs_links);
+		char cifsbuf[64] = {0};
 		sprintf(nfsbuf,"%d",it->nfs_links);
+		sprintf(cifsbuf,"%d",it->cifs_links);
 		snmp_add_var(pdu,objid_virtual_ip,sizeof(objid_virtual_ip)/sizeof(oid),'s',it->virip);
-		snmp_add_var(pdu,objid_nfs_links,sizeof(objid_nfs_links)/sizeof(oid),'i',cifsbuf);
-		snmp_add_var(pdu,objid_cifs_links,sizeof(objid_cifs_links)/sizeof(oid),'i',nfsbuf);
+		snmp_add_var(pdu,objid_nfs_links,sizeof(objid_nfs_links)/sizeof(oid),'i',nfsbuf);
+		snmp_add_var(pdu,objid_cifs_links,sizeof(objid_cifs_links)/sizeof(oid),'i',cifsbuf);
 	}
 	return 0;
 }
