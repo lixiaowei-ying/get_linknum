@@ -3,7 +3,7 @@
 import os,sys,getopt
 from lxml import etree
 
-PATH_XML_FILE = "/root/loadbalance.xml"
+PATH_XML_FILE = "/etc/pdns/loadbalance.xml"
 
 def usage() :
 	print sys.argv[0]+' [options] [arguments]'

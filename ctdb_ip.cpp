@@ -6,10 +6,12 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <syslog.h>
+#include <errno.h>
 #include <vector>
 #include <string>
 #include <sys/types.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 
 #include "ctdb_ip.h"
 
@@ -52,7 +54,7 @@ int virip_by_devip(const char *devip,char virip[][16])
 	}
 	sem_post(sem);
 	sem_close(sem);
-	munmap(shmptr,MAX_DEV_VIRIP * sizeof(struct Dev_Virip));
+	munmap(shmptr,4+MAX_DEV_VIRIP * sizeof(struct Dev_Virip));
 	
 	vector<struct Dev_Virip>::iterator it;
 	for (it = temp.begin(); it != temp.end(); it++)
@@ -102,7 +104,7 @@ char* devip_by_virip(const char *virip, char *devip)
 	}
 	sem_post(sem);
 	sem_close(sem);
-	munmap(shmptr,MAX_DEV_VIRIP * sizeof(struct Dev_Virip));
+	munmap(shmptr,4+MAX_DEV_VIRIP * sizeof(struct Dev_Virip));
 	
 	vector<struct Dev_Virip>::iterator it;
 	for (it = temp.begin(); it != temp.end(); it++)
@@ -227,13 +229,20 @@ static int get_dev_virip(vector<struct Dev_Virip> &dev)
  * */
 int shm_init(void)
 {
-	int fd = shm_open(SHM_NAME,O_CREAT | O_RDWR,666);
+//	int fd = shm_open(SHM_NAME,O_CREAT | O_RDWR,S_IRWXU|S_IRWXG|S_IRWXO);
+	umask(0);
+	int fd = shm_open(SHM_NAME,O_CREAT | O_RDWR,0777);
 	if (fd == -1)
+	{
+		syslog(LOG_ERR,"%s",strerror(errno));
 		return -1;
-	sem_t *sem = sem_open(SEM_NAME,O_CREAT | O_RDWR,666,1);
+	}
+//	sem_t *sem = sem_open(SEM_NAME,O_CREAT | O_RDWR,S_IRWXU|S_IRWXG|S_IRWXO,1);
+	sem_t *sem = sem_open(SEM_NAME,O_CREAT | O_RDWR,0777,1);
 	if (sem == SEM_FAILED)
 	{
 		close(fd);
+		syslog(LOG_ERR,"%s",strerror(errno));
 		return -1;
 	}
 	ftruncate(fd,4 + MAX_DEV_VIRIP * sizeof(struct Dev_Virip));
@@ -244,14 +253,21 @@ int shm_init(void)
 
 char *shmopen(void)
 {
-	int fd = shm_open(SHM_NAME,O_RDWR,666);
+//	int fd = shm_open(SHM_NAME,O_RDWR,S_IRWXU|S_IRWXG|S_IRWXO);
+	int fd = shm_open(SHM_NAME,O_RDWR,0777);
 	if (fd == -1)
+	{
+		syslog(LOG_ERR,"%s",strerror(errno));
 		return NULL;
-	char *shmptr = (char*)mmap(NULL,MAX_DEV_VIRIP*sizeof(struct Dev_Virip),
+	}
+	char *shmptr = (char*)mmap(NULL,4+MAX_DEV_VIRIP*sizeof(struct Dev_Virip),
 			PROT_READ | PROT_WRITE,MAP_SHARED,fd,0);
 	close(fd);
 	if (shmptr == MAP_FAILED)
+	{
+		syslog(LOG_ERR,"%s",strerror(errno));
 		return NULL;
+	}
 	return shmptr;
 }
 
@@ -259,7 +275,10 @@ sem_t *semopen(void)
 {
 	sem_t *sem = sem_open(SEM_NAME,O_RDWR);
 	if (sem == SEM_FAILED)
+	{
+		syslog(LOG_ERR,"%s",strerror(errno));
 		return NULL;
+	}
 	return sem;
 }
 

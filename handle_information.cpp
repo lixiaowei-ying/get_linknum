@@ -28,16 +28,13 @@ pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 extern netsnmp_session* ss;
 extern netsnmp_pdu* pdu;
 
-void handle_signal(int sign)
-{
-	unlink(SEM_NAME);
-	unlink(SHM_NAME);
-}
 
 void* pthread_collect(void*)
 {
 	while(1)
 	{
+		if (getppid() == 1)
+			pthread_exit(NULL);
 		vector<string> virip;
 		vector<struct LinkNum> temp_link;
 		if (get_virip(virip) < 0)
@@ -64,6 +61,8 @@ void* pthread_send(void*)
 	init_snmp("send_linknum");
 	while(1)
 	{
+		if (getppid() == 1)
+			pthread_exit(NULL);
 		vector<struct LinkNum> temp_link;
 		string device_ip;
 		if (get_device_ip(device_ip) < 0)
@@ -133,6 +132,8 @@ static int process_handle_virip(void)
 	}
 	while(1)
 	{
+		if (getppid() == 1)
+			exit(0);
 		update_dev_virip(shmptr,sem);
 		sleep(UPDATE_VIRIP_INTERVAL);
 	}
@@ -140,13 +141,12 @@ static int process_handle_virip(void)
 	return 0;
 }
 
-int main(int argc,char **argv)
+void main_process(void)
 {
-	signal(SIGINT|SIGQUIT,handle_signal);
 	if (check_parse_xmlfile() < 0)
 	{
 		syslog(LOG_ERR,"The XML file is NOT right!");
-		return 0;
+		return ;
 	}
 	pid_t pid_information,pid_virip;
 
@@ -171,6 +171,17 @@ int main(int argc,char **argv)
 	{
 		pid = pid == pid_information ? pid_virip:pid_information;
 		kill(pid,SIGKILL);
+	}
+	return ;
+}
+
+int main(int argc,char **argv)
+{
+	pid_t pid = fork();
+	if (pid == 0)
+	{
+		setsid();
+		main_process();
 	}
 	return 0;
 }
